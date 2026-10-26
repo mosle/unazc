@@ -4,6 +4,8 @@ English | [日本語](README.ja.md)
 
 Push-to-talk dictation for **Japanese** on Apple Silicon Macs. Hold Fn, speak, release: the text is pasted at the cursor. Recognition runs entirely on the Mac. It builds on openly published speech models and engines ([Acknowledgements](#acknowledgements)).
 
+<p align="center"><img src="docs/call-compact.png" width="266" alt="Unazc call window, compact"><br><sub>The optional call window, compact.</sub></p>
+
 The speech models are Japanese, and the app's menus and settings are in Japanese. The full documentation is in [README.ja.md](README.ja.md).
 
 ## Features
