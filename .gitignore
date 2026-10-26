@@ -1,0 +1,7 @@
+.build/
+build/
+vendor/
+/models
+*.p12
+.DS_Store
+__pycache__/
