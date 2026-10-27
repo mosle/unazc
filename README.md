@@ -58,7 +58,7 @@ A fixed signing identity keeps the microphone and Accessibility permissions acro
 | Fn+D | Adds a dictionary entry, starting from the last text |
 | Fn+R | Re-recognizes the last audio with the other engine and replaces the paste |
 
-Fn can also be set to press-to-start / press-to-stop, and F13–F19 can record too, alongside Fn or instead of it (the chosen F keys no longer reach other apps). Everything else is in the menu bar icon and its settings window; see [README.ja.md](README.ja.md) for every option, the command-line tools and the login agent.
+Fn can also be set to press-to-start / press-to-stop, and F13–F19 can record too, alongside Fn or instead of it, for a key on a macro pad or programmable keyboard (QMK, VIA, …) mapped to one of them (the chosen F keys no longer reach other apps). Everything else is in the menu bar icon and its settings window; see [README.ja.md](README.ja.md) for every option, the command-line tools and the login agent.
 
 ## Tests
 
