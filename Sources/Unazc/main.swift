@@ -166,11 +166,11 @@ if args.count >= 2, args[1] == "--call-demo" {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let call = CallWindow()
-    call.apply(visible: true, onTop: true, opacity: 1, compact: false)
+    call.apply(visible: true, onTop: true, opacity: 1, compact: false, recordKey: "Fn")
     call.setListening(true)
     for (i, compact) in [false, true].enumerated() {
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 3) {
-            call.apply(visible: true, onTop: true, opacity: 1, compact: compact)
+            call.apply(visible: true, onTop: true, opacity: 1, compact: compact, recordKey: "Fn")
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 3 + 1) { call.nod() }
     }

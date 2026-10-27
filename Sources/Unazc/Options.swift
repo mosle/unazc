@@ -187,7 +187,44 @@ enum Options {
         set { UserDefaults.standard.set(newValue, forKey: "callOpacity") }
     }
 
-    /// How Fn starts and stops a recording.
+    /// The keys that record; any one of them works. F20 is left out: the event tap posts it as a barrier.
+    enum RecordKey: String, CaseIterable {
+        case fn, f13, f14, f15, f16, f17, f18, f19
+
+        var keyCode: Int64 {
+            switch self {
+            case .fn: return 63
+            case .f13: return 105
+            case .f14: return 107
+            case .f15: return 113
+            case .f16: return 106
+            case .f17: return 64
+            case .f18: return 79
+            case .f19: return 80
+            }
+        }
+
+        init?(keyCode: Int64) {
+            guard let key = Self.allCases.first(where: { $0.keyCode == keyCode }) else { return nil }
+            self = key
+        }
+
+        var title: String { self == .fn ? "Fn" : rawValue.uppercased() }
+    }
+    /// Never empty: with none stored, Fn.
+    static var recordKeys: Set<RecordKey> {
+        get {
+            let keys = Set((UserDefaults.standard.stringArray(forKey: "recordKeys") ?? []).compactMap(RecordKey.init))
+            return keys.isEmpty ? [.fn] : keys
+        }
+        set { UserDefaults.standard.set(RecordKey.allCases.filter(newValue.contains).map(\.rawValue), forKey: "recordKeys") }
+    }
+    /// The first record key, for labels such as 「Fn+D」.
+    static var recordKeyTitle: String {
+        RecordKey.allCases.first(where: recordKeys.contains)!.title
+    }
+
+    /// How a record key starts and stops a recording.
     enum RecordKeyMode: String, CaseIterable {
         /// Records while Fn is held.
         case hold

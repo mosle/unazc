@@ -113,7 +113,19 @@ private struct SettingsView: View {
             .tabItem { Label("入力", systemImage: "character.cursor.ibeam") }
             Form {
                 Section("録音") {
-                    Picker("Fn キーの使い方", selection: model.binding({ Options.recordKeyMode }, { Options.recordKeyMode = $0 })) {
+                    LabeledContent("録音キー") {
+                        HStack {
+                            ForEach(Options.RecordKey.allCases, id: \.self) { key in
+                                Toggle(key.title, isOn: model.binding({ Options.recordKeys.contains(key) }, { on in
+                                    var keys = Options.recordKeys
+                                    if on { keys.insert(key) } else { keys.remove(key) }
+                                    if !keys.isEmpty { Options.recordKeys = keys }
+                                }))
+                                .toggleStyle(.button)
+                            }
+                        }
+                    }
+                    Picker("録音キーの使い方", selection: model.binding({ Options.recordKeyMode }, { Options.recordKeyMode = $0 })) {
                         ForEach(Options.RecordKeyMode.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     Picker("使った後もマイクを開いておく", selection: model.binding({ Options.micKeepOpenSeconds }, { Options.micKeepOpenSeconds = $0 },

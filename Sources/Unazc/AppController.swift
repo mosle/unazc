@@ -154,6 +154,9 @@ final class AppController: NSObject {
     /// Main thread: the front app's text options, rebuilt each time the menu opens (a menu-bar menu
     /// does not take the front from it).
     private let appOptionsItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    /// Main thread: the status line shows `idleHintText`.
+    private var showingIdleHint = false
+    private lazy var registerItem = NSMenuItem(title: "", action: #selector(registerWord), keyEquivalent: "").withTarget(self)
     private lazy var loginItem = NSMenuItem(title: "ログイン時に起動・落ちたら自動で再起動", action: #selector(toggleLogin), keyEquivalent: "").withTarget(self)
     /// Confined to `recordQueue`: segment-timer ticks, to run a preview every few of them.
     private var previewTick = 0
@@ -228,7 +231,7 @@ final class AppController: NSObject {
         if hotkey.start() {
             self.hotkey = hotkey
             Log.info("event tap started")
-            if modelLoaded { setStatus(Options.recordKeyMode == .toggle ? "待機中（Fnを押して話す）" : "待機中（Fn長押しで話す）") }
+            if modelLoaded { setStatus(idleHintText, idleHint: true) }
         } else {
             setStatus("アクセシビリティ権限を許可してください")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.startHotkey() }
@@ -592,7 +595,7 @@ final class AppController: NSObject {
 
     private func applyCallWindow() {
         callWindow.apply(visible: Options.callWindow, onTop: Options.callOnTop, opacity: Options.callOpacity,
-                         compact: Options.callCompact)
+                         compact: Options.callCompact, recordKey: Options.recordKeyTitle)
     }
 
     /// Runs on `recordQueue`. Returns the utterance so far and stops looking for pauses.
@@ -1049,6 +1052,8 @@ final class AppController: NSObject {
 
     private func updateOptionsMenu() {
         settings.refresh()
+        registerItem.title = "直前の文字を辞書に登録…（\(Options.recordKeyTitle)+D）"
+        if showingIdleHint { statusLine.title = idleHintText }
         optionsMenu.removeAllItems()
         for option in Option.allCases {
             let item = NSMenuItem(title: option.title, action: #selector(toggleOption(_:)), keyEquivalent: "")
@@ -1082,7 +1087,19 @@ final class AppController: NSObject {
             }
         }
         optionsMenu.addItem(.separator())
-        let keyHeader = NSMenuItem(title: "Fn キーの使い方", action: nil, keyEquivalent: "")
+        let recordKeysHeader = NSMenuItem(title: "録音キー（複数選べます）", action: nil, keyEquivalent: "")
+        recordKeysHeader.isEnabled = false
+        optionsMenu.addItem(recordKeysHeader)
+        for key in Options.RecordKey.allCases {
+            let item = NSMenuItem(title: key.title, action: #selector(toggleRecordKey(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = key.rawValue
+            item.state = Options.recordKeys.contains(key) ? .on : .off
+            item.indentationLevel = 1
+            optionsMenu.addItem(item)
+        }
+        optionsMenu.addItem(.separator())
+        let keyHeader = NSMenuItem(title: "録音キーの使い方", action: nil, keyEquivalent: "")
         keyHeader.isEnabled = false
         optionsMenu.addItem(keyHeader)
         for mode in Options.RecordKeyMode.allCases {
@@ -1196,6 +1213,17 @@ final class AppController: NSObject {
         recordQueue.async { [self] in applyMicPolicy() }
     }
 
+    /// Read by the event tap at each press. The last key cannot be turned off.
+    @objc private func toggleRecordKey(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let key = Options.RecordKey(rawValue: raw) else { return }
+        var keys = Options.recordKeys
+        if keys.contains(key) { keys.remove(key) } else { keys.insert(key) }
+        guard !keys.isEmpty else { return }
+        Options.recordKeys = keys
+        updateOptionsMenu()
+        applyCallWindow()
+    }
+
     /// Read by the event tap at each release, so a recording already latched still stops on the next press.
     @objc private func selectRecordKeyMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let mode = Options.RecordKeyMode(rawValue: raw) else { return }
@@ -1258,7 +1286,7 @@ final class AppController: NSObject {
         menu.addItem(NSMenuItem(title: "設定…", action: #selector(openSettings), keyEquivalent: ",").withTarget(self))
         menu.addItem(loginItem)
         updateLoginItem()
-        menu.addItem(NSMenuItem(title: "直前の文字を辞書に登録…（Fn+D）", action: #selector(registerWord), keyEquivalent: "").withTarget(self))
+        menu.addItem(registerItem)
         menu.addItem(NSMenuItem(title: "置き換え辞書を編集…", action: #selector(editVocabulary), keyEquivalent: "").withTarget(self))
         menu.addItem(NSMenuItem(title: "定型文を編集…", action: #selector(editSnippets), keyEquivalent: "").withTarget(self))
         menu.addItem(NSMenuItem(title: "ログを開く", action: #selector(openLog), keyEquivalent: "").withTarget(self))
@@ -1306,12 +1334,18 @@ final class AppController: NSObject {
         callWindow.setListening(on)
     }
 
-    private func setStatus(_ text: String) {
+    /// `idleHint`: the text is `idleHintText`, redrawn when the record key options change.
+    private func setStatus(_ text: String, idleHint: Bool = false) {
         guard Thread.isMainThread else {
-            DispatchQueue.main.async { self.setStatus(text) }
+            DispatchQueue.main.async { self.setStatus(text, idleHint: idleHint) }
             return
         }
         statusLine.title = text
+        showingIdleHint = idleHint
+    }
+
+    private var idleHintText: String {
+        Options.recordKeyMode == .toggle ? "待機中（\(Options.recordKeyTitle)を押して話す）" : "待機中（\(Options.recordKeyTitle)長押しで話す）"
     }
 
     @objc private func editVocabulary() {

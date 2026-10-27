@@ -1,7 +1,9 @@
 import AppKit
 import os
 
-/// Push-to-talk on the Fn key via a CGEventTap.
+/// Push-to-talk on the record keys (`Options.recordKeys`: Fn and/or F13–F19) via a CGEventTap.
+/// Below, Fn stands for whichever record key is held. F keys are swallowed, down, repeats and up,
+/// so they do not reach the front app; Fn goes through as before.
 ///
 /// Fn used as a modifier (Fn+arrow, Fn+Shift...) cancels instead of dictating. Esc while held
 /// cancels and is swallowed, including its repeats and keyUp, so it does not reach the front app.
@@ -26,7 +28,6 @@ final class HotkeyMonitor {
     enum Command { case repaste, undo, retry, register }
     private static let commandKeys: [Int64: Command] = [9: .repaste, 6: .undo, 15: .retry, 2: .register] // V, Z, R, D
 
-    private static let fnKeyCode: Int64 = 63 // kVK_Function
     private static let escKeyCode: Int64 = 53
     private static let shiftKeyCodes: Set<Int64> = [56, 60] // left, right
     private static let otherModifiers: CGEventFlags = [.maskShift, .maskControl, .maskAlternate, .maskCommand]
@@ -37,8 +38,11 @@ final class HotkeyMonitor {
     private var thread: Thread?
     /// Fn is physically down and this press is still a dictation candidate.
     private var armed = false
-    /// Fn is physically down (armed or already cancelled).
-    private var fnDown = false
+    /// The record key physically down (armed or already cancelled), only one at a time.
+    private var heldKey: Int64?
+    /// Fn is physically down, whether a record key or not. Read from Fn's own flagsChanged only:
+    /// F key events carry the Fn flag whether or not Fn is held.
+    private var fnPressed = false
     /// When the armed press went down, for telling a tap from a hold.
     private var armedAt: Double = 0
     /// Counts presses, so a late rejection cannot touch a later press.
@@ -113,6 +117,7 @@ final class HotkeyMonitor {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else { return false }
         self.tap = tap
+        fnPressed = Self.fnPhysicallyDown()
         let thread = Thread {
             let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
@@ -142,6 +147,53 @@ final class HotkeyMonitor {
         emit(.cancel)
     }
 
+    /// For when Fn's own flagsChanged may have been missed.
+    private static func fnPhysicallyDown() -> Bool {
+        CGEventSource.keyState(.hidSystemState, key: CGKeyCode(Options.RecordKey.fn.keyCode))
+    }
+
+    private func recordKeyDown(_ keyCode: Int64, flags: CGEventFlags) {
+        heldKey = keyCode
+        // The press that ends a latched recording, whatever else is held. Stopping on
+        // the press rather than the release keeps the latency of the hold mode.
+        if latch.withLock({ $0.latched.take() }) != nil {
+            stopping = true
+            emit(.release(time: nowMs(), send: Options.autoSend && flags.contains(.maskShift)))
+            return
+        }
+        // Fn pressed while another modifier is held is a shortcut, not dictation. With
+        // auto-send on, Shift may already be held: Shift then Fn starts a dictation that
+        // sends, and a re-press during the post-roll still cancels the pending finish.
+        let blocking = Options.autoSend ? Self.otherModifiers.subtracting(.maskShift) : Self.otherModifiers
+        guard flags.intersection(blocking).isEmpty, keyCode == Options.RecordKey.fn.keyCode || !fnPressed else { return }
+        armed = true
+        armedAt = nowMs()
+        pressID += 1
+        let id = pressID
+        emit(.press(time: armedAt, reject: { [latch] in
+            latch.withLock { state in
+                state.rejected = id
+                if state.latched == id { state.latched = nil }
+            }
+        }))
+    }
+
+    private func recordKeyUp(flags: CGEventFlags) {
+        heldKey = nil
+        stopping = false
+        guard armed else { return }
+        armed = false
+        let now = nowMs()
+        if Options.recordKeyMode.latches(heldMs: now - armedAt) {
+            let id = pressID
+            latch.withLock { state in
+                if state.rejected != id { state.latched = id }
+            }
+        } else {
+            emit(.release(time: now, send: Options.autoSend && flags.contains(.maskShift)))
+        }
+    }
+
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let userData = event.getIntegerValueField(.eventSourceUserData)
         if userData == Self.syntheticMarker {
@@ -156,7 +208,8 @@ final class HotkeyMonitor {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // Events were lost while disabled, so the Fn state is unknown: drop this press entirely.
             cancelIfRecording()
-            fnDown = false
+            heldKey = nil
+            fnPressed = Self.fnPhysicallyDown()
             stopping = false
             swallowingEsc = false
             swallowedKeys = []
@@ -164,48 +217,14 @@ final class HotkeyMonitor {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         case .flagsChanged:
             let flags = event.flags
-            if keyCode == Self.fnKeyCode {
+            if keyCode == Options.RecordKey.fn.keyCode { fnPressed = flags.contains(.maskSecondaryFn) }
+            // Membership is checked on the press only, so a key turned off while held still releases.
+            if keyCode == Options.RecordKey.fn.keyCode, heldKey == keyCode || heldKey == nil && Options.recordKeys.contains(.fn) {
                 let down = flags.contains(.maskSecondaryFn)
-                if down, !fnDown {
-                    fnDown = true
-                    // The press that ends a latched recording, whatever else is held. Stopping on
-                    // the press rather than the release keeps the latency of the hold mode.
-                    if latch.withLock({ $0.latched.take() }) != nil {
-                        stopping = true
-                        emit(.release(time: nowMs(), send: Options.autoSend && flags.contains(.maskShift)))
-                        return Unmanaged.passUnretained(event)
-                    }
-                    // Fn pressed while another modifier is held is a shortcut, not dictation. With
-                    // auto-send on, Shift may already be held: Shift then Fn starts a dictation that
-                    // sends, and a re-press during the post-roll still cancels the pending finish.
-                    let blocking = Options.autoSend ? Self.otherModifiers.subtracting(.maskShift) : Self.otherModifiers
-                    if flags.intersection(blocking).isEmpty {
-                        armed = true
-                        armedAt = nowMs()
-                        pressID += 1
-                        let id = pressID
-                        emit(.press(time: armedAt, reject: { [latch] in
-                            latch.withLock { state in
-                                state.rejected = id
-                                if state.latched == id { state.latched = nil }
-                            }
-                        }))
-                    }
-                } else if !down, fnDown {
-                    fnDown = false
-                    stopping = false
-                    if armed {
-                        armed = false
-                        let now = nowMs()
-                        if Options.recordKeyMode.latches(heldMs: now - armedAt) {
-                            let id = pressID
-                            latch.withLock { state in
-                                if state.rejected != id { state.latched = id }
-                            }
-                        } else {
-                            emit(.release(time: now, send: Options.autoSend && flags.contains(.maskShift)))
-                        }
-                    }
+                if down, heldKey == nil {
+                    recordKeyDown(keyCode, flags: flags)
+                } else if !down, heldKey != nil {
+                    recordKeyUp(flags: flags)
                 }
             } else if Options.autoSend, Self.shiftKeyCodes.contains(keyCode) {
                 // Shift during dictation is the send gesture, read at release.
@@ -215,6 +234,20 @@ final class HotkeyMonitor {
                 cancelIfArmed()
             }
         case .keyDown:
+            if heldKey == keyCode { return nil } // auto-repeat of an F key
+            if let key = Options.RecordKey(keyCode: keyCode), key != .fn, Options.recordKeys.contains(key) {
+                // A repeat is a press whose start was not seen (the tap was reset, or the key was
+                // turned on while held): it neither starts nor stops anything, and its keyUp goes on.
+                if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+                if heldKey == nil {
+                    recordKeyDown(keyCode, flags: event.flags)
+                } else {
+                    // A second record key: like any other key while Fn is held, a cancel.
+                    cancelIfArmed()
+                    swallowedKeys.insert(keyCode)
+                }
+                return nil
+            }
             if keyCode == Self.escKeyCode, armed || latched || swallowingEsc {
                 swallowingEsc = true
                 cancelIfRecording()
@@ -222,7 +255,8 @@ final class HotkeyMonitor {
             }
             if swallowedKeys.contains(keyCode) { return nil } // auto-repeat
             // Not a repeat: a key already down and delivered to the app before Fn keeps going there.
-            if fnDown, event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+            if let heldKey, heldKey == Options.RecordKey.fn.keyCode || !fnPressed,
+               event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
                event.flags.intersection(Self.otherModifiers).isEmpty, let command = Self.commandKeys[keyCode] {
                 cancelIfArmed()
                 swallowedKeys.insert(keyCode)
@@ -232,6 +266,10 @@ final class HotkeyMonitor {
             cancelIfArmed()
             noteUserInput()
         case .keyUp:
+            if heldKey == keyCode {
+                recordKeyUp(flags: event.flags)
+                return nil
+            }
             if keyCode == Self.escKeyCode, swallowingEsc {
                 swallowingEsc = false
                 return nil

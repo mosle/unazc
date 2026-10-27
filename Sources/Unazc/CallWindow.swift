@@ -40,13 +40,14 @@ final class CallWindow {
 
     var isVisible: Bool { panel.isVisible }
 
-    func apply(visible: Bool, onTop: Bool, opacity: Double, compact: Bool) {
+    func apply(visible: Bool, onTop: Bool, opacity: Double, compact: Bool, recordKey: String) {
         panel.level = onTop ? .floating : .normal
         panel.collectionBehavior = onTop ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.managed]
         panel.alphaValue = opacity
         model.onTop = onTop
         model.opacity = opacity
         model.compact = compact
+        model.recordKey = recordKey
         // Resized about the top-left corner, so switching keeps the window where it was put.
         let size = CallView.size(compact: compact)
         if panel.frame.size != size {
@@ -73,6 +74,7 @@ private final class CallModel: ObservableObject {
     @Published var onTop = true
     @Published var opacity = 1.0
     @Published var compact = false
+    @Published var recordKey = "Fn"
 }
 
 private struct CallActions {
@@ -172,7 +174,7 @@ private struct CallView: View {
     }
 
     private var status: some View {
-        Text(model.listening ? "聞いています…" : "Fn を押して話す")
+        Text(model.listening ? "聞いています…" : "\(model.recordKey) を押して話す")
     }
 
     private func hangUpButton(size: CGFloat) -> some View {
