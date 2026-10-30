@@ -1054,14 +1054,14 @@ final class AppController: NSObject {
         settings.refresh()
         registerItem.title = "直前の文字を辞書に登録…（\(Options.recordKeyTitle)+D）"
         if showingIdleHint { statusLine.title = idleHintText }
-        optionsMenu.removeAllItems()
+        let menu = NSMenu()
         for option in Option.allCases {
             let item = NSMenuItem(title: option.title, action: #selector(toggleOption(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = option.rawValue
             item.state = option.isOn ? .on : .off
             if option == .callCompact || option == .callOnTop { item.indentationLevel = 1 }
-            optionsMenu.addItem(item)
+            menu.addItem(item)
             if option == .callOnTop {
                 let current = Options.callOpacity
                 let choices = Options.callOpacityChoices.contains(current)
@@ -1077,43 +1077,43 @@ final class AppController: NSObject {
                 }
                 opacity.submenu = submenu
                 opacity.indentationLevel = 1
-                optionsMenu.addItem(opacity)
+                menu.addItem(opacity)
             }
             if option == .liveText, !previewSummary.isEmpty {
                 let note = NSMenuItem(title: previewSummary, action: nil, keyEquivalent: "")
                 note.isEnabled = false
                 note.indentationLevel = 1
-                optionsMenu.addItem(note)
+                menu.addItem(note)
             }
         }
-        optionsMenu.addItem(.separator())
+        menu.addItem(.separator())
         let recordKeysHeader = NSMenuItem(title: "録音キー（複数選べます）", action: nil, keyEquivalent: "")
         recordKeysHeader.isEnabled = false
-        optionsMenu.addItem(recordKeysHeader)
+        menu.addItem(recordKeysHeader)
         for key in Options.RecordKey.allCases {
             let item = NSMenuItem(title: key.title, action: #selector(toggleRecordKey(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = key.rawValue
             item.state = Options.recordKeys.contains(key) ? .on : .off
             item.indentationLevel = 1
-            optionsMenu.addItem(item)
+            menu.addItem(item)
         }
-        optionsMenu.addItem(.separator())
+        menu.addItem(.separator())
         let keyHeader = NSMenuItem(title: "録音キーの使い方", action: nil, keyEquivalent: "")
         keyHeader.isEnabled = false
-        optionsMenu.addItem(keyHeader)
+        menu.addItem(keyHeader)
         for mode in Options.RecordKeyMode.allCases {
             let item = NSMenuItem(title: mode.title, action: #selector(selectRecordKeyMode(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
             item.state = mode == Options.recordKeyMode ? .on : .off
             item.indentationLevel = 1
-            optionsMenu.addItem(item)
+            menu.addItem(item)
         }
-        optionsMenu.addItem(.separator())
+        menu.addItem(.separator())
         let micHeader = NSMenuItem(title: "使った後もマイクを開いておく（話し始めが切れない）", action: nil, keyEquivalent: "")
         micHeader.isEnabled = false
-        optionsMenu.addItem(micHeader)
+        menu.addItem(micHeader)
         let keepOpen = Options.micKeepOpenSeconds
         let keepChoices = Options.micKeepOpenChoices.contains(keepOpen)
             ? Options.micKeepOpenChoices : Options.micKeepOpenChoices + [keepOpen]
@@ -1124,12 +1124,12 @@ final class AppController: NSObject {
             item.representedObject = seconds
             item.state = seconds == keepOpen ? .on : .off
             item.indentationLevel = 1
-            optionsMenu.addItem(item)
+            menu.addItem(item)
         }
-        optionsMenu.addItem(.separator())
+        menu.addItem(.separator())
         let header = NSMenuItem(title: "録音を終えた後も続ける時間", action: nil, keyEquivalent: "")
         header.isEnabled = false
-        optionsMenu.addItem(header)
+        menu.addItem(header)
         let current = Options.postRollMs
         // A value set outside the menu (defaults write) is shown, checked, so the menu tells the truth.
         let choices = Options.postRollChoices.contains(current)
@@ -1141,8 +1141,12 @@ final class AppController: NSObject {
             item.representedObject = ms
             item.state = ms == current ? .on : .off
             item.indentationLevel = 1
-            optionsMenu.addItem(item)
+            menu.addItem(item)
         }
+        menu.keepOpenOnClick()
+        optionsMenu.update(from: menu)
+        // Its 「全体の設定に従う」 items show the global values just changed.
+        updateAppOptionsItem()
     }
 
     private func updateAppOptionsItem() {
@@ -1169,7 +1173,8 @@ final class AppController: NSObject {
                 submenu.addItem(item)
             }
         }
-        appOptionsItem.submenu = submenu
+        submenu.keepOpenOnClick()
+        if let current = appOptionsItem.submenu { current.update(from: submenu) } else { appOptionsItem.submenu = submenu }
     }
 
     static func overrideTitle(_ value: Bool?, global: Bool) -> String {
@@ -1193,6 +1198,7 @@ final class AppController: NSObject {
     @objc private func selectAppOverride(_ sender: NSMenuItem) {
         guard let choice = sender.representedObject as? AppOverrideChoice else { return }
         Options.setOverride(choice.option, app: choice.app, choice.value)
+        updateAppOptionsItem()
         settings.refresh()
     }
 
